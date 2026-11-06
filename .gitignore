@@ -1,0 +1,7 @@
+# Secrets and machine-specific files
+config/config.php
+tools/*.exe
+storage/uploads/*
+!storage/uploads/.htaccess
+.DS_Store
+Thumbs.db
