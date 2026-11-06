@@ -1,0 +1,232 @@
+/*
+ * assets/css/print.css
+ *
+ * Stylesheet of common/print.php ONLY (Step 8). It is plain CSS and is not
+ * compiled by Tailwind, so the paper layout stays exact.
+ *
+ * Paper: 8.5 x 13 in (Legal / Folio), margins as in Evaluation_Form.docx.
+ * The letterhead and the footer are "fixed": the browser repeats them on every
+ * printed page, and the page margins below leave room for them.
+ */
+
+/* ---------- Paper ---------- */
+@page {
+    size: 8.5in 13in;
+    /* The letterhead and footer are drawn inside the content area (see .page-header
+       and .page-footer below); the spacer rows of table.paper keep text away from them. */
+    margin: 0.3in 0.5in 0.4in 0.5in;
+
+    /* "Page X of Y" (Chrome and Edge). Browsers that do not support
+       page-margin boxes simply leave it out. */
+    @bottom-right {
+        content: "Page " counter(page) " of " counter(pages);
+        font-family: "Century Gothic", CenturyGothic, "Avant Garde", Arial, Helvetica, sans-serif;
+        font-size: 8pt;
+        vertical-align: bottom;
+        padding-bottom: 0.1in;
+    }
+}
+
+/* ---------- Basics ---------- */
+* { box-sizing: border-box; }
+
+html { -webkit-print-color-adjust: exact; print-color-adjust: exact; }
+
+body {
+    margin: 0;
+    background: #e5e7eb;
+    color: #000;
+    font-family: "Century Gothic", CenturyGothic, "Avant Garde", Arial, Helvetica, sans-serif;
+    font-size: 8pt;
+    line-height: 1.25;
+}
+
+p { margin: 0; }
+
+/* The spacer table: on screen it is invisible plumbing. */
+.paper { width: 100%; border-collapse: collapse; }
+.paper td { padding: 0; }
+.head-space, .foot-space { display: none; }
+
+/* ---------- Top bar (screen only) ---------- */
+.topbar {
+    display: flex; flex-wrap: wrap; align-items: center; gap: 0.5rem;
+    padding: 0.75rem 1rem;
+    background: #14532d;
+    color: #fff;
+    font-family: Arial, Helvetica, sans-serif;
+    font-size: 14px;
+    position: sticky; top: 0; z-index: 10;
+}
+.topbar-btn {
+    display: inline-flex; align-items: center; justify-content: center;
+    min-height: 44px; padding: 0 1.1rem;
+    border: 1px solid #fff; border-radius: 0.6rem;
+    background: transparent; color: #fff;
+    font: inherit; font-weight: 600; text-decoration: none; cursor: pointer;
+}
+.topbar-btn:hover { background: rgba(255, 255, 255, 0.15); }
+.topbar-btn:focus-visible { outline: 3px solid #bbf7d0; outline-offset: 2px; }
+.topbar-primary { background: #fff; color: #14532d; }
+.topbar-primary:hover { background: #dcfce7; }
+.topbar-hint { flex: 1 1 18rem; font-size: 12px; opacity: 0.9; }
+
+/* ---------- The paper on screen ---------- */
+.page-header, .sheet, .page-footer {
+    width: 7.5in; max-width: 100%;
+    margin-left: auto; margin-right: auto;
+    background: #fff;
+}
+.page-header { margin-top: 1rem; padding: 0.3in 0 0; }
+.sheet       { padding: 0.1in 0 0.2in; }
+.page-footer { padding: 0 0 0.2in; }
+
+/* ---------- Letterhead + form box ---------- */
+.page-header { display: flex; align-items: flex-start; justify-content: space-between; }
+.letterhead { width: 4.9in; }                     /* about 65% of the printable width */
+.letterhead img { display: block; width: 100%; height: auto; }
+.letterhead-text { text-align: center; font-size: 7pt; line-height: 1.25; }
+.letterhead-name { font-size: 10pt; font-weight: bold; }
+
+.form-box { width: 2.45in; border-collapse: collapse; margin-top: 0.12in; font-size: 8pt; }
+.form-box th { text-align: right; font-weight: normal; padding: 0.02in 0.08in 0.02in 0; white-space: nowrap; }
+.form-box td { text-align: left; padding: 0.02in 0; white-space: nowrap; }
+
+/* ---------- Title ---------- */
+.form-title { margin: 0.02in 0 0; text-align: center; font-size: 13pt; font-weight: bold; letter-spacing: 0.02em; }
+.ref-line   { text-align: right; font-size: 7.5pt; margin-bottom: 0.08in; }
+
+/* ---------- Header fields ---------- */
+.head-fields { width: 100%; border-collapse: collapse; margin-bottom: 0.12in; }
+.head-fields th { width: 1.45in; text-align: right; font-weight: bold; padding: 0.025in 0.08in 0.025in 0; vertical-align: bottom; white-space: nowrap; }
+.head-fields td.line { width: 2.9in; border-bottom: 1px solid #000; padding: 0.025in 0.04in; height: 0.19in; vertical-align: bottom; }
+.head-fields td.gap  { width: 0.35in; }
+.head-fields th.mode-label { width: auto; text-align: left; padding-left: 0; vertical-align: top; }
+.head-fields td.mode-value { vertical-align: top; font-size: 9pt; padding-top: 0.03in; }
+
+/* ---------- Section titles ---------- */
+.section-title { font-weight: bold; margin: 0.08in 0 0.06in; }
+.section-sub   { margin: 0.05in 0 0.05in; }
+.section-letter { display: inline-block; min-width: 0.35in; font-weight: bold; }
+
+/* ---------- Section A table ---------- */
+.items { width: 100%; border-collapse: collapse; table-layout: fixed; margin-bottom: 0.1in; }
+.items th, .items td { border: 1px solid #000; padding: 0.03in 0.05in; vertical-align: top; }
+.items th { background: #ffff00; font-weight: bold; text-align: center; vertical-align: middle; font-size: 8pt; }
+.items td.text   { white-space: pre-wrap; overflow-wrap: anywhere; }
+.items td.center { text-align: center; overflow-wrap: anywhere; }
+.items .blank-row td { height: 0.24in; }
+
+.items .col-no      { width: 0.55in; }
+.items .col-spec    { width: 1.95in; }
+.items .col-bidder  { width: 1.95in; }
+.items .col-finding { width: 1.35in; }
+.items .col-grounds { width: 1.7in; }
+/* The supplier copy has only three columns, so they share the width. */
+.items-supplier .col-no     { width: 0.7in; }
+.items-supplier .col-spec   { width: 3.4in; }
+.items-supplier .col-bidder { width: 3.4in; }
+
+/* Repeat the header row on every page; never split a row across pages. */
+.items thead { display: table-header-group; }
+.items tbody { display: table-row-group; }
+.items tr    { break-inside: avoid; page-break-inside: avoid; }
+
+/* ---------- Sections B and C ---------- */
+.block { break-inside: avoid; page-break-inside: avoid; }
+
+.params { display: grid; gap: 0.05in 0.1in; margin: 0.03in 0 0.04in 0.35in; }
+.params-4 { grid-template-columns: 1.35in 1.45in 1.2in 1.6in; }
+.params-3 { grid-template-columns: 2.2in 2.6in 1fr; }
+.param { display: inline-flex; align-items: center; gap: 0.04in; white-space: nowrap; }
+
+.box {
+    display: inline-block; width: 0.13in; height: 0.13in;
+    border: 1px solid #000; flex: none;
+    font-size: 7.5pt; font-weight: bold; line-height: 0.11in; text-align: center;
+}
+
+.details-label { margin: 0.02in 0 0 0.35in; font-style: italic; font-size: 7.5pt; }
+
+/* Ruled lines for the details: one real border per line (crisp in the PDF). */
+.details { margin: 0.02in 0 0.04in 0.35in; }
+.rule { min-height: 0.2in; line-height: 0.19in; border-bottom: 1px solid #000; white-space: pre-wrap; overflow-wrap: anywhere; break-inside: avoid; }
+
+/* ---------- Signatures ---------- */
+.signatures { margin-top: 0.08in; }
+.sig-row { display: flex; gap: 0.6in; justify-content: center; padding: 0 0.3in; }
+.sig-box { width: 2.7in; text-align: center; }
+.sig-heading { text-align: left; font-weight: normal; }
+.sig-image { height: 0.45in; display: flex; align-items: flex-end; justify-content: center; }
+.sig-image img { max-height: 0.45in; max-width: 2.4in; display: block; }
+.sig-line { border-bottom: 1px solid #000; min-height: 0.2in; padding: 0 0.04in; font-weight: bold; text-transform: uppercase; text-align: center; }
+.sig-caption { font-size: 8pt; }
+.sig-caption-left { text-align: left; }
+.sig-date { font-size: 7.5pt; margin-top: 0.03in; }
+
+.conforme { width: 3.9in; margin-top: 0.08in; }
+.conforme .sig-image { justify-content: flex-start; }
+.conforme .sig-line  { text-align: left; }
+.conforme-date { margin-top: 0.07in; }
+.conforme-date-line { display: inline-block; min-width: 2.1in; border-bottom: 1px solid #000; padding: 0 0.04in; }
+
+/* ---------- Important Notes ---------- */
+.notes { margin-top: 0.07in; border: 1px solid #000; padding: 0.04in 0.1in; font-size: 7pt; line-height: 1.2; }
+.notes ol { margin: 0.02in 0 0; padding-left: 0.3in; }
+
+/* ---------- Definition of Terms (always the last page) ---------- */
+.terms { break-before: page; page-break-before: always; }
+.terms-title { margin: 0.1in 0 0.2in; text-align: center; font-size: 11pt; font-weight: bold; }
+.term { margin-bottom: 0.14in; font-size: 7.5pt; line-height: 1.35; break-inside: avoid; }
+
+/* ---------- DRAFT / CANCELLED watermark ---------- */
+.watermark {
+    position: fixed; top: 38%; left: 0; right: 0;
+    text-align: center;
+    font-family: Arial, Helvetica, sans-serif;
+    font-size: 110pt; font-weight: bold; letter-spacing: 0.1em;
+    color: rgba(0, 0, 0, 0.07);
+    transform: rotate(-35deg);
+    pointer-events: none; user-select: none;
+    z-index: 5;
+}
+
+/* ===========================================================================
+   PRINT
+   =========================================================================== */
+@media print {
+    .head-space, .foot-space { display: block; }
+    .no-print { display: none !important; }
+
+    body { background: #fff; }
+
+    .sheet { width: auto; padding: 0; }
+
+    /* Letterhead: repeated on every page, at the top of the content area. */
+    .page-header {
+        position: fixed; top: 0; left: 0; right: 0;
+        width: auto; margin: 0; padding: 0;
+    }
+    .head-space { height: 1in; }
+
+    /* Footer: repeated on every page, at the bottom of the content area. */
+    .page-footer {
+        display: flex; align-items: stretch;
+        position: fixed; bottom: 0; left: 0; width: 5.6in; margin: 0; padding: 0;
+        border: 1px solid #000; font-size: 8pt; line-height: 1.25;
+    }
+    .foot-space { height: 0.5in; }
+    .footer-code  { width: 1.7in; padding: 0.1in 0.08in; border-right: 1px solid #000; display: flex; align-items: flex-end; }
+    .footer-title { flex: 1; padding: 0.06in 0.08in; text-align: right; }
+
+    .paper, .paper > tbody > tr > td, .paper > thead > tr > td, .paper > tfoot > tr > td { padding: 0; }
+    .paper > thead { display: table-header-group; }
+    .paper > tfoot { display: table-footer-group; }
+
+    .watermark { top: 4.6in; }
+}
+
+/* On screen the footer is not shown (it exists for the printed pages). */
+@media screen {
+    .page-footer { display: none; }
+}

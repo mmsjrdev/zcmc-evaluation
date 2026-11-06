@@ -252,13 +252,14 @@ function can_edit_supplier_part(array $user, array $eval): bool
 
 /**
  * May this person change the EVALUATOR-owned fields (Findings, Grounds,
- * Sections B and C)? Only the assigned evaluator, while the form is waiting
- * for evaluation (or was returned to them), and only until they sign.
+ * Sections B and C)? Only the assigned person (an evaluator, or a Department
+ * Head who evaluates), while the form is waiting for evaluation (or was
+ * returned to them), and only until they sign this version.
  */
 function can_edit_evaluator_part(array $user, array $eval): bool
 {
     return user_is_usable($user)
-        && $user['role'] === 'evaluator'
+        && in_array($user['role'], ['evaluator', 'head'], true)
         && !empty($eval['evaluator_id'])
         && (int) $eval['evaluator_id'] === (int) $user['id']
         && in_array($eval['status'] ?? '', ['pending_evaluation', 'returned_evaluator'], true)

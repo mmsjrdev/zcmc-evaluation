@@ -3,11 +3,11 @@
  * evaluator/assignments.php
  *
  * For evaluators and for Department Heads who also evaluate.
- *   Tab "Assigned to me":  forms given to this person. Each has "Send back to
- *                          Head Nurse" (reason required) until the first signature.
+ *   Tab "Assigned to me":  forms given to this person. Each has "Open form"
+ *                          (Step 7) and "Send back to Head Nurse" (reason
+ *                          required) until the first signature.
  *   Tab "Department pool": forms of this person's department that nobody has
  *                          claimed. "Claim" is a POST; only one person can win.
- * Filling in the evaluator part of a form is Step 7.
  */
 
 require_once __DIR__ . '/../app/bootstrap.php';
@@ -125,6 +125,11 @@ page_header('Assignments', 'Forms for you to evaluate');
                         <input type="hidden" name="id" value="<?= (int) $f['id'] ?>">
                         <button type="submit" class="btn btn-primary w-full sm:w-auto">Claim this form</button>
                     </form>
+                <?php endif; ?>
+
+                <?php if ($tab === 'assigned'): ?>
+                    <!-- Step 7: open the evaluator form (it shows the read-only view if it can no longer be edited) -->
+                    <a href="<?= e(url('evaluator/evaluate.php?id=' . (int) $f['id'])) ?>" class="btn btn-primary mt-3 w-full sm:w-auto">Open form</a>
                 <?php endif; ?>
 
                 <?php if ($tab === 'assigned' && can_send_back_evaluation($user, $f)): ?>

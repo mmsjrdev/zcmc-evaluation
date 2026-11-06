@@ -11,8 +11,8 @@ Hosting: XAMPP first, then InfinityFree (only `config/config.php` changes)
 - [x] 3 Layout (Tailwind)
 - [x] 4 Supplier form
 - [x] 5 MMS intake
-- [ ] 6 Head Nurse distribution
-- [ ] 7 Evaluator form
+- [x] 6 Head Nurse distribution
+- [x] 7 Evaluator form
 - [ ] 8 Print view
 - [ ] 9 Signing (evaluator, head)
 - [ ] 10 Conforme and verification
