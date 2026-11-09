@@ -8,6 +8,9 @@
  *                       Until then the account works as an Evaluator.
  * Suppliers, MMS staff, Head Nurses and admins can NOT register here.
  * Whatever is chosen is only a REQUEST: the stored role is always "evaluator".
+ *
+ * Step 15: while OTP_ENABLED is true, the new account is not usable until the
+ * email is confirmed with a 6-digit code (auth/verify-email.php).
  */
 
 require_once __DIR__ . '/../app/bootstrap.php';
@@ -135,6 +138,15 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 
             audit_write($newId, 'register', 'Registered as ' . $values['register_as'] . ' (status ' . $status . ')');
 
+            // Step 15: with OTP on, the email must be confirmed with a code before
+            // the account can be used. email_verified_at stays empty until then.
+            if (otp_required('register')) {
+                session_regenerate_id(true);
+                $_SESSION['verify_user_id'] = $newId;
+                flash('success', 'Account created. Confirm your email with the code we send you to finish.');
+                redirect('auth/verify-email.php');
+            }
+
             if ($status === 'pending') {
                 flash('success', 'Account created. Your Department Head request waits for the administrator. '
                     . 'Until it is approved you can sign in and work as an Evaluator.');
@@ -214,6 +226,9 @@ require __DIR__ . '/../app/views/layout/auth-top.php';
         <label for="email" class="mb-1 block text-sm font-medium text-slate-700">Email</label>
         <input id="email" name="email" type="email" required maxlength="190" autocomplete="username"
                value="<?= e($values['email']) ?>" class="<?= e(input_class($errors, 'email')) ?>">
+        <?php if (otp_required('register')): ?>
+            <p class="mt-1 text-xs text-slate-500">We will email you a 6-digit code to confirm this address, so use one you can open now.</p>
+        <?php endif; ?>
         <?php field_error($errors, 'email'); ?>
     </div>
 

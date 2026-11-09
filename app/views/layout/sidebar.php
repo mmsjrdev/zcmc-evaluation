@@ -7,6 +7,10 @@
  *
  * A menu item whose page file does not exist yet (a later Step builds it) is
  * shown greyed out with "Soon", so nobody clicks into a 404.
+ *
+ * Step 12: the admin's "Role Requests" item shows how many Department Head
+ * requests are waiting.
+ * Step 15: the admin menu has an "Email Test" item (admin/mail-test.php).
  */
 
 /** Small line icons (Heroicons style). Each value is the "d" of one SVG path. */
@@ -87,6 +91,7 @@ function nav_groups(array $user): array
                 ['Lists',          'admin/lists.php',         'clipboard'],
                 ['Verifiers',      'admin/verifiers.php',     'pen'],
                 ['Audit Log',      'admin/audit.php',         'list'],
+                ['Email Test',     'admin/mail-test.php',     'send'],
             ]];
             $groups[] = ['Material Management', $mmsItems];
             break;
@@ -123,10 +128,24 @@ function nav_is_active(string $path): bool
     return true;
 }
 
+/** How many Department Head requests wait for the administrator (menu badge). */
+function nav_pending_head_requests(): int
+{
+    try {
+        return (int) db()->query(
+            "SELECT COUNT(*) FROM users
+              WHERE role = 'evaluator' AND status = 'pending' AND requested_role = 'head'"
+        )->fetchColumn();
+    } catch (Throwable $e) {
+        return 0;   // the menu must never break a page
+    }
+}
+
 /** Prints the menu. Lives in a function so its loop variables never leak into the page. */
 function render_sidebar(array $user, string $roleText, int $navUnread): void
 {
-$projectRoot = __DIR__ . '/../../../';
+$projectRoot  = __DIR__ . '/../../../';
+$pendingHeads = $user['role'] === 'admin' ? nav_pending_head_requests() : 0;
 ?>
 <nav class="flex-1 overflow-y-auto px-3 py-4" aria-label="Main menu">
     <?php foreach (nav_groups($user) as [$heading, $items]): ?>
@@ -148,6 +167,10 @@ $projectRoot = __DIR__ . '/../../../';
                         <span class="flex-1"><?= e($label) ?></span>
                         <?php if ($path === 'common/notifications.php' && $navUnread > 0): ?>
                             <span class="rounded-full bg-amber-400 px-2 py-0.5 text-xs font-bold text-slate-900"><?= $navUnread > 99 ? '99+' : $navUnread ?></span>
+                        <?php endif; ?>
+                        <?php if ($path === 'admin/role-requests.php' && $pendingHeads > 0): ?>
+                            <span class="rounded-full bg-amber-400 px-2 py-0.5 text-xs font-bold text-slate-900"
+                                  title="Department Head requests waiting"><?= $pendingHeads > 99 ? '99+' : $pendingHeads ?></span>
                         <?php endif; ?>
                     </a>
                 <?php else: ?>

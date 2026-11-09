@@ -15,6 +15,7 @@
  *   - which status may move to which: app/domain/workflow.php (transition())
  *   - who may do what: app/core/permissions.php
  *   - the content hash: app/domain/content-hash.php
+ *   - one-time codes: app/services/otp.php (Step 15)
  *
  * The `signatures` table is INSERT-ONLY: this file never runs UPDATE or DELETE on it.
  */
@@ -28,12 +29,15 @@ require_once __DIR__ . '/content-hash.php';      // form_content_hash()
  * When $auditAction is set, signing_sign() writes it to the audit log AFTER the
  * transaction is rolled back (an audit row written inside the transaction
  * would be rolled back too).
+ * $afterRollback (Step 15) is a small function that also runs AFTER the rollback.
+ * It is used to count a wrong one-time code, which must not be undone.
  */
 class SigningRefused extends WorkflowException
 {
     public array $problems = [];
     public string $auditAction = '';
     public string $auditDetails = '';
+    public ?Closure $afterRollback = null;
 
     public function __construct(string $message, array $problems = [], string $auditAction = '', string $auditDetails = '')
     {
@@ -143,17 +147,58 @@ function signing_lock(int $id): void
     $lock->execute([':id' => $id]);
 }
 
-/** Rolls back, writes the audit row of a refusal (if it has one), and re-throws. */
+/**
+ * Rolls back, then (in this order) counts a wrong one-time code, writes the
+ * audit row of a refusal (if it has one), and re-throws.
+ */
 function signing_abort(Throwable $ex): void
 {
     $pdo = db();
     if ($pdo->inTransaction()) {
         $pdo->rollBack();
     }
-    if ($ex instanceof SigningRefused && $ex->auditAction !== '') {
-        audit($ex->auditAction, $ex->auditDetails);
+    if ($ex instanceof SigningRefused) {
+        if ($ex->afterRollback !== null) {
+            ($ex->afterRollback)();
+        }
+        if ($ex->auditAction !== '') {
+            audit($ex->auditAction, $ex->auditDetails);
+        }
     }
     throw $ex;
+}
+
+/**
+ * Step 15: checks the one-time code typed for signing and uses it up.
+ * Call it inside the signing transaction, at the place where the password
+ * check used to be. Throws SigningRefused when the code is missing, wrong,
+ * expired or already used. A WRONG code is counted (5 tries per code) even
+ * though the transaction rolls back, through $afterRollback.
+ */
+function signing_require_otp(int $userId, string $code, string $auditDetails): void
+{
+    $check = otp_check(['id' => $userId], 'sign', $code);
+
+    if (!$check['ok']) {
+        $refused = new SigningRefused(
+            $check['message'],
+            [],
+            $check['count_failure'] ? 'signing_otp_failed' : '',
+            $auditDetails
+        );
+        if ($check['count_failure']) {
+            $codeId = (int) $check['code_id'];
+            $refused->afterRollback = static function () use ($codeId): void {
+                otp_record_failure($codeId);
+            };
+        }
+        throw $refused;
+    }
+
+    // Single use. If the form check fails later, the rollback gives the code back.
+    if (!otp_consume((int) $check['code_id'])) {
+        throw new SigningRefused('This code was already used or has expired. Ask for a new code.');
+    }
 }
 
 // ===========================================================================
@@ -168,7 +213,8 @@ function signing_abort(Throwable $ex): void
  *   signature_png     PNG data URL from the signature pad
  *   typed_name        the full name typed by the signer
  *   acknowledge       '1' when the box is ticked
- *   password          the signer's password (OTP comes in Step 15)
+ *   password          the signer's password (used while OTP is off)
+ *   otp_code          the 6-digit emailed code (used while OTP_ENABLED is true)
  *   save_signature    '1' = keep this drawing as the saved signature
  *
  * Throws SigningRefused (a WorkflowException) with a plain message when
@@ -246,11 +292,6 @@ function signing_sign(array $user, int $id, array $input): void
             );
         }
 
-        // OTP is not built yet (Step 15). If someone switches it on early, refuse safely.
-        if (otp_required('sign')) {
-            throw new SigningRefused('One-time codes are not available yet. Signing stays closed until Step 15.');
-        }
-
         // The acknowledgment box.
         if ((string) ($input['acknowledge'] ?? '') !== '1') {
             throw new SigningRefused('Please tick the box to confirm your signature.');
@@ -271,23 +312,33 @@ function signing_sign(array $user, int $id, array $input): void
                 : 'Please draw your signature in the box.');
         }
 
-        // (f) The password. Too many wrong tries in 10 minutes block signing for a while.
-        $failCount = $pdo->prepare(
-            "SELECT COUNT(*) FROM audit_log
-              WHERE user_id = :u AND action = 'signing_password_failed'
-                AND created_at >= DATE_SUB(NOW(), INTERVAL 10 MINUTE)"
-        );
-        $failCount->execute([':u' => (int) $user['id']]);
-        if ((int) $failCount->fetchColumn() >= 5) {
-            throw new SigningRefused('Too many wrong passwords. Wait 10 minutes and try again.');
-        }
-        if (!password_verify((string) ($input['password'] ?? ''), (string) $me['password_hash'])) {
-            throw new SigningRefused(
-                'The password is not correct.',
-                [],
-                'signing_password_failed',
-                'Evaluation #' . $id . ': wrong password while signing as ' . $role . '.'
+        // (f) Proof that the signer is really them: a fresh one-time code when
+        // OTP is on (Step 15), otherwise the password.
+        if (otp_required('sign')) {
+            signing_require_otp(
+                (int) $user['id'],
+                (string) ($input['otp_code'] ?? ''),
+                'Evaluation #' . $id . ': wrong one-time code while signing as ' . $role . '.'
             );
+        } else {
+            // Too many wrong tries in 10 minutes block signing for a while.
+            $failCount = $pdo->prepare(
+                "SELECT COUNT(*) FROM audit_log
+                  WHERE user_id = :u AND action = 'signing_password_failed'
+                    AND created_at >= DATE_SUB(NOW(), INTERVAL 10 MINUTE)"
+            );
+            $failCount->execute([':u' => (int) $user['id']]);
+            if ((int) $failCount->fetchColumn() >= 5) {
+                throw new SigningRefused('Too many wrong passwords. Wait 10 minutes and try again.');
+            }
+            if (!password_verify((string) ($input['password'] ?? ''), (string) $me['password_hash'])) {
+                throw new SigningRefused(
+                    'The password is not correct.',
+                    [],
+                    'signing_password_failed',
+                    'Evaluation #' . $id . ': wrong password while signing as ' . $role . '.'
+                );
+            }
         }
 
         // First evaluator signature: the reference number is created now. A

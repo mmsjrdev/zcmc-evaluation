@@ -5,7 +5,8 @@
  * The signing screen for the EVALUATOR and the DEPARTMENT HEAD.
  * First the whole form to read (read only), then the signing box:
  * signature (drawn, or "use my saved signature"), typed full name,
- * acknowledgment, password, and an optional "save this signature".
+ * acknowledgment, password (or a one-time code when OTP_ENABLED is true),
+ * and an optional "save this signature".
  *
  * All rules are checked again by signing_sign() in ONE transaction. This page
  * only shows the screen and the messages. It needs JavaScript for the pad.
@@ -59,32 +60,50 @@ if ($role === 'evaluator') {
 $noVerifier = $role === 'evaluator' && $user['role'] === 'head'
     && !department_has_other_verifier((int) $eval['department_id'], (int) $user['id']);
 
+$canSign = $problems === [] && !$noVerifier;
+
+// Step 15: with OTP on, a one-time code replaces the password.
+$useOtp    = otp_required('sign');
+$otpNotice = '';
+$otpError  = '';
+
 $formError  = '';
 $formList   = [];
 $typedName  = '';
 
 if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     csrf_check();
-    $typedName = (string) ($_POST['typed_name'] ?? '');
 
-    try {
-        signing_sign($user, $id, $_POST);
-
-        if ($role === 'evaluator') {
-            flash('success', 'Signed. The form now goes to the Department Head.');
-            redirect('common/evaluation-view.php?id=' . $id);
+    if ($useOtp && (string) ($_POST['otp_action'] ?? '') === 'send') {
+        // The "Send me a code" button: it only emails a code. Nothing is signed.
+        if ($canSign) {
+            $sent = otp_issue($user, 'sign');
+            if ($sent['ok']) {
+                $otpNotice = $sent['message'];
+            } else {
+                $otpError = $sent['message'];
+            }
         }
-        flash('success', 'Signed. The form now waits for the supplier\'s Conforme.');
-        redirect('head/for-signature.php');
-    } catch (SigningRefused $ex) {
-        $formError = $ex->getMessage();
-        $formList  = $ex->problems;
-    } catch (WorkflowException $ex) {
-        $formError = $ex->getMessage();
+    } else {
+        $typedName = (string) ($_POST['typed_name'] ?? '');
+
+        try {
+            signing_sign($user, $id, $_POST);
+
+            if ($role === 'evaluator') {
+                flash('success', 'Signed. The form now goes to the Department Head.');
+                redirect('common/evaluation-view.php?id=' . $id);
+            }
+            flash('success', 'Signed. The form now waits for the supplier\'s Conforme.');
+            redirect('head/for-signature.php');
+        } catch (SigningRefused $ex) {
+            $formError = $ex->getMessage();
+            $formList  = $ex->problems;
+        } catch (WorkflowException $ex) {
+            $formError = $ex->getMessage();
+        }
     }
 }
-
-$canSign = $problems === [] && !$noVerifier;
 
 $ackText = 'I confirm that this is my signature, that I have reviewed this evaluation form, and that I am signing it voluntarily.';
 $inputClass = 'mt-1 block min-h-11 w-full rounded-xl border border-slate-300 bg-white px-3 py-2 text-sm text-slate-900 focus:border-brand-600 focus:outline-none focus:ring-4 focus:ring-brand-200';
@@ -137,6 +156,31 @@ page_header($pageTitle, mms_form_title($eval));
         <noscript>
             <p class="mt-3 rounded-xl border border-amber-300 bg-amber-50 px-4 py-3 text-sm text-amber-900">Signing needs JavaScript to draw the signature. Please turn it on.</p>
         </noscript>
+
+        <?php if ($useOtp): ?>
+            <!-- Step 1 of 2: ask for the one-time code (a separate small form) -->
+            <div class="mt-4 rounded-xl border border-slate-200 bg-slate-50 p-4">
+                <h3 class="text-sm font-semibold text-slate-900">Step 1: Get a one-time code</h3>
+                <p class="mt-1 text-sm text-slate-600">
+                    We email a 6-digit code to <strong><?= e(otp_mask_email((string) $user['email'])) ?></strong>.
+                    It replaces your password, works once, and expires in <?= (int) OTP_EXPIRY_MINUTES ?> minutes.
+                    Ask for the code first, then fill in the form below.
+                </p>
+
+                <?php if ($otpNotice !== ''): ?>
+                    <p role="status" class="mt-3 rounded-xl border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm font-medium text-emerald-800"><?= e($otpNotice) ?></p>
+                <?php endif; ?>
+                <?php if ($otpError !== ''): ?>
+                    <p role="alert" class="mt-3 rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-sm font-medium text-red-800"><?= e($otpError) ?></p>
+                <?php endif; ?>
+
+                <form method="post" action="<?= e(url('common/sign.php?id=' . $id)) ?>" class="mt-3">
+                    <?= csrf_field() ?>
+                    <input type="hidden" name="otp_action" value="send">
+                    <button type="submit" class="btn btn-secondary w-full sm:w-auto">Send me a code</button>
+                </form>
+            </div>
+        <?php endif; ?>
 
         <form method="post" action="<?= e(url('common/sign.php?id=' . $id)) ?>" class="mt-4 space-y-5" novalidate autocomplete="off">
             <?= csrf_field() ?>
@@ -193,11 +237,20 @@ page_header($pageTitle, mms_form_title($eval));
                 <span><?= e($ackText) ?></span>
             </label>
 
-            <!-- Password (an OTP replaces this in Step 15) -->
-            <div>
-                <label for="password" class="block text-sm font-medium text-slate-700">Enter your password to sign</label>
-                <input type="password" id="password" name="password" autocomplete="current-password" class="<?= $inputClass ?>">
-            </div>
+            <?php if ($useOtp): ?>
+                <!-- Step 2 of 2: the one-time code replaces the password -->
+                <div>
+                    <label for="otp_code" class="block text-sm font-medium text-slate-700">Step 2: Enter the 6-digit code from your email</label>
+                    <input type="text" id="otp_code" name="otp_code" maxlength="6" inputmode="numeric" pattern="[0-9]*"
+                           autocomplete="one-time-code" class="<?= $inputClass ?>">
+                </div>
+            <?php else: ?>
+                <!-- Password -->
+                <div>
+                    <label for="password" class="block text-sm font-medium text-slate-700">Enter your password to sign</label>
+                    <input type="password" id="password" name="password" autocomplete="current-password" class="<?= $inputClass ?>">
+                </div>
+            <?php endif; ?>
 
             <div class="flex flex-col gap-3 sm:flex-row">
                 <button type="submit" class="btn btn-primary w-full sm:w-auto">Sign</button>

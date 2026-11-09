@@ -10,8 +10,8 @@
  *   conforme_sign($user, $id, $_POST)    the supplier signs; form becomes "completed"
  *
  * It reuses the Step 9 helpers (signing_lock, signing_abort, signing_clean_png,
- * signing_tidy_name, signing_normalize_name, SigningRefused). Every check runs
- * inside ONE transaction with a row lock. `signatures` stays insert-only.
+ * signing_tidy_name, signing_normalize_name, signing_require_otp, SigningRefused).
+ * Every check runs inside ONE transaction with a row lock. `signatures` stays insert-only.
  */
 
 require_once __DIR__ . '/signing.php';   // also loads supplier-forms.php, content-hash.php, evaluator-forms.php
@@ -133,7 +133,8 @@ function conforme_integrity_problem(int $id, int $version): ?string
  * The supplier signs the Conforme on their device.
  *
  * $input is $_POST. Keys used: signature_png, typed_name, position,
- * business_name, acknowledge, password.
+ * business_name, acknowledge, password (while OTP is off) or otp_code
+ * (while OTP_ENABLED is true).
  *
  * Throws SigningRefused with a plain message when anything is wrong. Nothing
  * is saved in that case.
@@ -177,11 +178,6 @@ function conforme_sign(array $user, int $id, array $input): void
             );
         }
 
-        // OTP is not built yet (Step 15). If someone switches it on early, refuse safely.
-        if (otp_required('sign')) {
-            throw new SigningRefused('One-time codes are not available yet. Signing stays closed until Step 15.');
-        }
-
         // The acknowledgment box.
         if ((string) ($input['acknowledge'] ?? '') !== '1') {
             throw new SigningRefused('Please tick the box to confirm your signature.');
@@ -217,23 +213,33 @@ function conforme_sign(array $user, int $id, array $input): void
             throw new SigningRefused('Please draw your signature in the box.');
         }
 
-        // The password. Too many wrong tries in 10 minutes block signing for a while.
-        $failCount = $pdo->prepare(
-            "SELECT COUNT(*) FROM audit_log
-              WHERE user_id = :u AND action = 'signing_password_failed'
-                AND created_at >= DATE_SUB(NOW(), INTERVAL 10 MINUTE)"
-        );
-        $failCount->execute([':u' => (int) $user['id']]);
-        if ((int) $failCount->fetchColumn() >= 5) {
-            throw new SigningRefused('Too many wrong passwords. Wait 10 minutes and try again.');
-        }
-        if (!password_verify((string) ($input['password'] ?? ''), (string) $me['password_hash'])) {
-            throw new SigningRefused(
-                'The password is not correct.',
-                [],
-                'signing_password_failed',
-                'Evaluation #' . $id . ': wrong password while signing the Conforme.'
+        // Proof that the signer is really them: a fresh one-time code when OTP
+        // is on (Step 15), otherwise the password.
+        if (otp_required('sign')) {
+            signing_require_otp(
+                (int) $user['id'],
+                (string) ($input['otp_code'] ?? ''),
+                'Evaluation #' . $id . ': wrong one-time code while signing the Conforme.'
             );
+        } else {
+            // Too many wrong tries in 10 minutes block signing for a while.
+            $failCount = $pdo->prepare(
+                "SELECT COUNT(*) FROM audit_log
+                  WHERE user_id = :u AND action = 'signing_password_failed'
+                    AND created_at >= DATE_SUB(NOW(), INTERVAL 10 MINUTE)"
+            );
+            $failCount->execute([':u' => (int) $user['id']]);
+            if ((int) $failCount->fetchColumn() >= 5) {
+                throw new SigningRefused('Too many wrong passwords. Wait 10 minutes and try again.');
+            }
+            if (!password_verify((string) ($input['password'] ?? ''), (string) $me['password_hash'])) {
+                throw new SigningRefused(
+                    'The password is not correct.',
+                    [],
+                    'signing_password_failed',
+                    'Evaluation #' . $id . ': wrong password while signing the Conforme.'
+                );
+            }
         }
 
         // The content hash of the form exactly as it is now.

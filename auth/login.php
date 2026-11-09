@@ -6,6 +6,9 @@
  *  - 5 wrong passwords for one email within 10 minutes locks that email for a while.
  *  - Wrong email and wrong password show the SAME message.
  *  - Disabled or rejected accounts cannot sign in.
+ *  - Step 15: while OTP_ENABLED is true, an account whose email is not confirmed
+ *    yet is sent to auth/verify-email.php after the correct password.
+ *    Login itself stays email + password.
  */
 
 require_once __DIR__ . '/../app/bootstrap.php';
@@ -34,7 +37,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 
     } else {
         // Find the account.
-        $stmt = db()->prepare('SELECT id, password_hash, status FROM users WHERE email = :email LIMIT 1');
+        $stmt = db()->prepare('SELECT id, password_hash, status, email_verified_at FROM users WHERE email = :email LIMIT 1');
         $stmt->execute([':email' => $email]);
         $row = $stmt->fetch();
 
@@ -49,11 +52,13 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         } elseif (in_array($row['status'], ['disabled', 'rejected'], true)) {
             $error = 'This account cannot sign in. Contact the administrator.';
 
-        } elseif (otp_required('login')) {
-            // Step 15 will send and check the one-time code here.
-            // Until it is built we refuse to sign in, so switching OTP_ENABLED on
-            // by mistake can never skip the check.
-            $error = 'One-time password sign-in is turned on but is not built yet.';
+        } elseif (otp_required('register') && empty($row['email_verified_at'])) {
+            // Correct password, but the email was never confirmed with a code.
+            // Do NOT sign in yet: remember who passed the password step and ask for the code.
+            clear_failed_attempts($email);
+            session_regenerate_id(true);
+            $_SESSION['verify_user_id'] = (int) $row['id'];
+            redirect('auth/verify-email.php');
 
         } else {
             // Correct password: keep the hash up to date with the newest PHP algorithm.

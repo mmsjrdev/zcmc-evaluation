@@ -1,8 +1,8 @@
 # ZCMC Evaluation Form System - Progress
 
 Project: Digital Evaluation Form ZCMC-F-PROC-29 (Rev. 0, 8.5 x 13 in)
-Stack: native PHP 8, MySQL (PDO), Tailwind CSS v4 (standalone CLI), vanilla JS
-Hosting: XAMPP first, then InfinityFree (only `config/config.php` changes)
+Stack: native PHP 8, MySQL (PDO), Tailwind CSS v4 (standalone CLI), vanilla JS, PHPMailer (Step 15 only)
+Hosting: XAMPP first, then InfinityFree or other hosting (only `config/config.php` changes)
 
 ## Step checklist (Guide Rev. 2, supplier-first)
 
@@ -17,10 +17,26 @@ Hosting: XAMPP first, then InfinityFree (only `config/config.php` changes)
 - [x] 9 Signing (evaluator, head)
 - [x] 10 Conforme and verification
 - [x] 11 MMS records
-- [ ] 12 Admin
-- [ ] 13 Test and security
-- [ ] 14 InfinityFree
-- [ ] 15 OTP (final)
+- [x] 12 Admin
+- [ ] 13 Test and security (SKIPPED for now. Must be done before real data goes in.)
+- [ ] 14 InfinityFree (SKIPPED for now. Deploy last.)
+- [x] 15 OTP (final) (done and working on localhost)
+
+## Before going live (open items)
+
+1. Run the Step 13 security review and fix every Critical and High item.
+2. Deploy (Step 14 / deploy checklist below).
+3. Rotate the Gmail app password that was pasted into the chat. Put the new one only in the server's `config/config.php`.
+
+## Deploy checklist
+
+- Do NOT upload: `database/dev-test-users.sql`, `install.php` (delete it after the first admin exists), the local `config/config.php`, `docs/`, `resources/`, the Tailwind .exe, `.git/`, `composer.json`, `composer.lock`, local files in `storage/uploads/`.
+- Upload: everything else, including the compiled `assets/css/app.css` and every `.htaccess` (app/, config/, storage/, storage/uploads/, vendor/). `vendor/` only if OTP will be used on that server.
+- Server `config/config.php`: `ENV` = 'live', `BASE_URL` with https and no trailing slash, the database values from the hosting panel, `OTP_ENABLED` = false on InfinityFree.
+- Database: import `database/schema.sql` (it must include `users.email_verified_at` and `otp_codes`; if not, run the Step 15 ALTER once). Create the first admin, set `email_verified_at`, change the password.
+- Hosting needs: PHP 8+, `pdo_mysql`, `mbstring`, `gd`, https, a correct time zone, `storage/uploads/` writable, upload limits large enough for scans.
+- After upload: `app/`, `config/`, `storage/` and `vendor/` must be blocked in the browser. Run the full flow once (register, form, every step, sign, print to PDF).
+- After launch: export the database regularly and back up `storage/uploads/`.
 
 ## Step log
 
@@ -31,7 +47,7 @@ Hosting: XAMPP first, then InfinityFree (only `config/config.php` changes)
 
 ### Step 2 - Accounts and roles
 - **Files:** `app/bootstrap.php` (changed: loads auth.php). New: `app/core/auth.php`, `app/core/permissions.php` (filled in), `app/views/layout/auth-top.php`, `auth-bottom.php`, `auth/register.php`, `login.php`, `logout.php`, `change-password.php`, `pending.php`, `common/dashboard.php` (placeholder).
-- **Decisions:** A pending head is stored as role `evaluator`, status `pending`, requested_role `head`. Lockout is 5 failures per 10 minutes per email, not per IP. Logout is a POST with a confirm card. Login refuses if `OTP_ENABLED` is on before Step 15. Evaluators also see `returned_evaluator` forms. The department pool means no evaluator assigned yet.
+- **Decisions:** A pending head is stored as role `evaluator`, status `pending`, requested_role `head`. Lockout is 5 failures per 10 minutes per email, not per IP. Logout is a POST with a confirm card. Login refused when `OTP_ENABLED` was on before Step 15 (replaced in Step 15, see below). Evaluators also see `returned_evaluator` forms. The department pool means no evaluator assigned yet.
 - **Known issues:** No rate limit on registration. No self-service password reset (admin resets it). The dashboard is temporary.
 - **Database:** no changes.
 
@@ -68,7 +84,7 @@ Hosting: XAMPP first, then InfinityFree (only `config/config.php` changes)
 
 ### Step 9 - Signing
 - **Files:** new `assets/js/signature-pad.js`, `app/domain/signing.php`, `content-hash.php`, `app/views/partials/evaluation-summary.php`, `common/sign.php`, `return.php`, `cancel.php`, `head/for-signature.php`. Changed: `permissions.php`, `common/evaluation-view.php` (Print, Sign, Return, Cancel, signature images), `print-form.php`.
-- **Decisions:** All checks in one transaction (`signing_sign`). `form_content_hash()` hashes the CURRENT stored form, so only current-version signatures can be re-verified. Ref no from `series_counters`. Return raises version. Five wrong passwords in 10 minutes block signing. Supplier is also notified when the head signs.
+- **Decisions:** All checks in one transaction (`signing_sign`). `form_content_hash()` hashes the CURRENT stored form, so only current-version signatures can be re-verified. Ref no from `series_counters`. Return raises version. Five wrong passwords in 10 minutes block signing (while OTP is off). Supplier is also notified when the head signs.
 - **Known issues:** Supplier Cancel and Print buttons not yet in `supplier/form-view.php`. Needs JavaScript. `flash('error')` type assumed.
 - **Database:** no changes.
 
@@ -84,6 +100,13 @@ Hosting: XAMPP first, then InfinityFree (only `config/config.php` changes)
 - **Known issues:** `common/dashboard.php` still needs the MMS panel call in its mm_staff branch (require_once mms-records.php, mms-ui.php, mms-dashboard.php, then `mms_dashboard_panel();`); not confirmed done. Tailwind rebuild needed. The records page and verify page read the form on every open, so a mismatch is audited the first time it is seen (once per hour).
 - **Database:** no changes (no new index was needed).
 - **Step 12 needs:** `users` (role, status, requested_role, department_id, employee_id, position, must_change_password), `alternate_verifiers` (department_id, head_user_id, unique pair), `departments` and `procurement_modes` (both have `active`), `audit_log`. A pending head is stored as role `evaluator`, status `pending`, requested_role `head`. `verifier_department_ids()` in permissions.php reads `$user['verifier_department_ids']` (set by current_user()) or falls back to the alternate_verifiers table. The role-request count badge belongs in `app/views/layout/sidebar.php`. Admin may view signature records (record.php, verify.php) but must never create, change or delete a signature.
+
+### Step 15 - OTP (done; Steps 13 and 14 were skipped on purpose)
+- **Files:** new `app/services/mail.php` (PHPMailer over SMTP, branded HTML email with the logo `assets/img/zcmc.png` embedded, plain-text fallback), `auth/verify-email.php`, `admin/mail-test.php`, `vendor/.htaccess`. Changed: `app/services/otp.php` (full OTP service), `auth/login.php`, `auth/register.php`, `app/domain/signing.php`, `app/domain/supplier-conforme.php`, `common/sign.php`, `supplier/conforme.php`, `app/views/layout/sidebar.php` ("Email Test" item for admin), `config/config.php` and `config.sample.php` (new `SMTP_HOST`, `SMTP_PORT`, `SMTP_USER`, `SMTP_PASS`, `SMTP_FROM`).
+- **Decisions:** `otp_required($purpose)` is true only for `register` and `sign` while `OTP_ENABLED` is true. Login stays email + password. With OTP on, an account with an empty `email_verified_at` is NOT signed in after the correct password; it is sent to `auth/verify-email.php` (the session keeps only `verify_user_id`). Signing: a fresh code replaces the password re-entry in `signing_sign()` and `conforme_sign()` through `signing_require_otp()`, inside the same transaction; the code is consumed there and given back if the rest of the transaction fails. A wrong code is counted even though the transaction rolls back (`SigningRefused::$afterRollback`, run in `signing_abort()`). Codes: 6 digits, only a hash is stored, 10 minutes, single use, 5 tries, 60 seconds between codes, at most 10 codes per hour. A signing code is only sent to an email that was already confirmed. With `OTP_ENABLED` false the system behaves exactly as before (password at signing, no confirmation at registration). A pending Department Head still needs admin approval after the email is confirmed; the two are separate.
+- **Known issues:** InfinityFree free hosting very likely blocks outbound SMTP, so keep `OTP_ENABLED` false there. Accounts created directly in SQL (first admin, dev users) need `UPDATE users SET email_verified_at = NOW() WHERE email = '...';` or they cannot pass the confirmation page once OTP is on. The Gmail account is for testing only; use a hospital mailbox on the hospital domain for real use. The Gmail app password was shared in the chat and must be rotated. Registration with a code was tested on localhost; test the signing code flow (evaluator, head, Conforme) too, including a wrong code, a reused code and a second code within 60 seconds. Confirm that `database/schema.sql` was updated by hand with `users.email_verified_at` and the `otp_codes` table (it was given as two snippets).
+- **Database:** `ALTER TABLE users ADD COLUMN email_verified_at DATETIME NULL AFTER email;` then `UPDATE users SET email_verified_at = NOW() WHERE email_verified_at IS NULL;`, and new table `otp_codes` (id, user_id, purpose [register|sign], code_hash, expires_at, used_at, attempts, created_at; foreign key to users with ON DELETE CASCADE).
+- **Install:** `composer require phpmailer/phpmailer` on XAMPP. To upload for OTP: `vendor/autoload.php`, `vendor/composer/`, `vendor/phpmailer/phpmailer/src/` and `vendor/.htaccess`.
 
 ## Tailwind commands (Windows)
 
