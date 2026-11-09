@@ -17,6 +17,11 @@
  *   - loads only the Conforme signature (the evaluator's and the head's
  *     signature rows are not even read).
  * The evaluator data is loaded in the other branch only, so it cannot leak by mistake.
+ *
+ * Step 10: the footer also shows the verify address
+ * (BASE_URL + /common/verify.php?code=REF-NO). It holds no form content.
+ * The stylesheet link carries the file's change time, so the browser never
+ * shows an old print.css after you edit it.
  */
 
 require_once __DIR__ . '/../app/bootstrap.php';
@@ -73,6 +78,14 @@ $refNo     = trim((string) ($meta['ref_no'] ?? ''));
 $formNo    = (string) $meta['form_no'];
 $revNo     = (string) $meta['revision_no'];
 $effective = print_effectivity_date();
+
+// The address printed in the footer so anybody can check the form (Step 10).
+$verifyUrl = $refNo !== ''
+    ? rtrim(BASE_URL, '/') . '/common/verify.php?code=' . rawurlencode($refNo)
+    : '';
+
+// The print stylesheet with its change time, so a new print.css always loads.
+$cssVersion = (int) @filemtime(__DIR__ . '/../assets/css/print.css');
 
 // Watermark: DRAFT until the form is completed (CANCELLED for a cancelled form).
 $watermark = '';
@@ -139,7 +152,7 @@ $pageTitle = 'Print - Evaluation form';
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <title><?= e($refNo !== '' ? $refNo : 'Evaluation form') ?> - Evaluation Form</title>
-    <link rel="stylesheet" href="<?= e(url('assets/css/print.css')) ?>">
+    <link rel="stylesheet" href="<?= e(url('assets/css/print.css')) ?>?v=<?= $cssVersion ?>">
 </head>
 <body>
 
@@ -184,6 +197,10 @@ $pageTitle = 'Print - Evaluation form';
         <?= e((string) ($eval['bidder'] ?? '') !== '' ? $eval['bidder'] : 'Bidder’s Name') ?>
         <br>
         <?= e((string) ($eval['header_item_no'] ?? '') !== '' ? 'Item No. ' . $eval['header_item_no'] : 'Technical Specifications/Item Description') ?>
+        <?php if ($verifyUrl !== ''): ?>
+            <br>
+            <span class="footer-verify">Verify: <?= e($verifyUrl) ?></span>
+        <?php endif; ?>
     </div>
 </footer>
 
@@ -330,7 +347,7 @@ $pageTitle = 'Print - Evaluation form';
         <div class="conforme">
             <p class="sig-heading">Conforme:</p>
             <?= $signature($signatures['conforme'] ?? null) ?>
-            <p class="sig-caption sig-caption-left"><em>(Signature of Printed Name of the Bidder’s Authorized Representative)</em></p>
+            <p class="sig-caption"><em>(Signature of Printed Name of the Bidder’s Authorized Representative)</em></p>
             <p class="conforme-date">Date and Time:
                 <span class="conforme-date-line"><?= e(!empty($signatures['conforme']) ? print_date_time($signatures['conforme']['signed_at']) : '') ?></span>
             </p>

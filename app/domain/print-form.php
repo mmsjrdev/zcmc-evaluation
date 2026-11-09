@@ -80,7 +80,7 @@ function print_load_signatures(int $evaluationId, int $version, array $roles): a
     }
 
     $stmt = db()->prepare(
-        'SELECT role, typed_name, signature_png, signed_at
+        'SELECT role, typed_name, position, signature_png, signed_at
            FROM signatures
           WHERE evaluation_id = :id AND version = :version
             AND role IN (' . implode(', ', $marks) . ')'

@@ -7,10 +7,15 @@
  * head_nurse, each only through can_view_evaluation().
  * The supplier role is always refused: suppliers must never receive evaluator
  * data. They keep supplier/form-view.php.
+ *
+ * Step 9 buttons (each one only where the permission functions allow it):
+ *   Print, Edit, Review and sign, Return for correction, Cancel form.
  */
 
 require_once __DIR__ . '/../app/bootstrap.php';
 require_once __DIR__ . '/../app/domain/evaluator-forms.php';
+require_once __DIR__ . '/../app/domain/print-form.php';          // print_load_signatures(), print_date_time()
+require_once __DIR__ . '/../app/views/partials/evaluation-summary.php';
 
 // 'supplier' is NOT in this list, so a supplier gets forbidden() here.
 $user = require_role(['evaluator', 'head', 'admin', 'mm_staff', 'head_nurse']);
@@ -26,7 +31,14 @@ $items   = ev_load_items_full($id);
 $history = ev_load_history($id);
 $values  = ev_values_from_db($eval, $items);
 
-$canEdit = can_edit_evaluator_part($user, $eval);
+// What this person may do now (all decided in app/core/permissions.php).
+$canEdit   = can_edit_evaluator_part($user, $eval);
+$signRole  = signing_role_for($user, $eval);          // 'evaluator', 'head' or null
+$canReturn = can_return_evaluation($user, $eval);
+$canCancel = can_cancel_evaluation($user, $eval);
+
+// The signatures that count for the current version (names and dates only are shown here).
+$signatures = print_load_signatures($id, (int) $eval['version'], ['evaluator', 'head', 'conforme']);
 
 // The "ready" box only matters while the evaluator is still working.
 $showReady = in_array($eval['status'], ['pending_evaluation', 'returned_evaluator'], true);
@@ -45,8 +57,9 @@ if ($showReady) {
     }
 }
 
-$qualityParams = quality_parameters();
-$othersParams  = others_parameters();
+$backPage = $user['role'] === 'evaluator'
+    ? 'evaluator/assignments.php'
+    : ($user['role'] === 'head' ? 'head/for-signature.php' : 'common/dashboard.php');
 
 $pageTitle = 'Evaluation form';
 require __DIR__ . '/../app/views/layout/header.php';
@@ -54,18 +67,31 @@ require __DIR__ . '/../app/views/layout/header.php';
 page_header('Evaluation form', mms_form_title($eval));
 ?>
 
-<?php if ($canEdit): ?>
-    <p class="mb-4">
+<!-- Buttons -->
+<div class="mb-4 flex flex-col gap-3 sm:flex-row sm:flex-wrap">
+    <a href="<?= e(url('common/print.php?id=' . $id)) ?>" target="_blank" rel="noopener" class="btn btn-secondary w-full sm:w-auto">Print / Save as PDF</a>
+    <?php if ($canEdit): ?>
         <a href="<?= e(url('evaluator/evaluate.php?id=' . $id)) ?>" class="btn btn-primary w-full sm:w-auto">Edit</a>
-    </p>
-<?php endif; ?>
+    <?php endif; ?>
+    <?php if ($signRole !== null): ?>
+        <a href="<?= e(url('common/sign.php?id=' . $id)) ?>" class="btn btn-primary w-full sm:w-auto">
+            <?= $signRole === 'evaluator' ? 'Review and sign as evaluator' : 'Review and sign as Department Head' ?>
+        </a>
+    <?php endif; ?>
+    <?php if ($canReturn): ?>
+        <a href="<?= e(url('common/return.php?id=' . $id)) ?>" class="btn btn-secondary w-full sm:w-auto">Return for correction</a>
+    <?php endif; ?>
+</div>
 
 <!-- Ready box -->
 <?php if ($showReady): ?>
     <?php if ($problems === []): ?>
         <div class="mb-4 rounded-xl border border-green-300 bg-green-50 px-4 py-3 text-sm text-green-900">
             <p class="font-semibold">Ready</p>
-            <p class="mt-1">Every item has a finding and Sections B and C are complete. Signing comes in a later step.</p>
+            <p class="mt-1">
+                Every item has a finding and Sections B and C are complete.
+                <?= $signRole === 'evaluator' ? 'You can now review and sign.' : '' ?>
+            </p>
         </div>
     <?php else: ?>
         <div class="mb-4 rounded-xl border border-amber-300 bg-amber-50 px-4 py-3 text-sm text-amber-900">
@@ -79,80 +105,52 @@ page_header('Evaluation form', mms_form_title($eval));
     <?php endif; ?>
 <?php endif; ?>
 
-<!-- Header -->
-<section class="card mb-4">
-    <div class="flex items-start justify-between gap-3">
-        <h2 class="text-base font-semibold text-slate-900">Form details</h2>
-        <?= status_badge($eval['status']) ?>
-    </div>
-    <dl class="mt-4 grid gap-x-6 gap-y-3 text-sm sm:grid-cols-2">
-        <div><dt class="text-slate-500">Bid/Reference No.</dt><dd class="font-medium text-slate-900"><?= e($eval['bid_ref_no'] !== '' ? $eval['bid_ref_no'] : '-') ?></dd></div>
-        <div><dt class="text-slate-500">Mode of Procurement</dt><dd class="font-medium text-slate-900"><?= e((string) ($eval['mode_name'] ?? '-')) ?></dd></div>
-        <div><dt class="text-slate-500">Date of Opening</dt><dd class="font-medium text-slate-900"><?= e(mms_date($eval['opening_date'])) ?></dd></div>
-        <div><dt class="text-slate-500">Bidder</dt><dd class="font-medium text-slate-900"><?= e((string) ($eval['bidder'] ?? '-')) ?></dd></div>
-        <div><dt class="text-slate-500">Date of Evaluation</dt><dd class="font-medium text-slate-900"><?= e(mms_date($eval['eval_date'])) ?></dd></div>
-        <div><dt class="text-slate-500">Item No.</dt><dd class="font-medium text-slate-900"><?= e((string) ($eval['header_item_no'] ?? '-')) ?></dd></div>
-        <div><dt class="text-slate-500">Department</dt><dd class="font-medium text-slate-900"><?= e((string) ($eval['department_name'] ?? '-')) ?></dd></div>
-        <div><dt class="text-slate-500">Evaluator</dt><dd class="font-medium text-slate-900"><?= e((string) ($eval['evaluator_name'] ?? 'Not assigned yet')) ?></dd></div>
-    </dl>
-</section>
+<?php evaluation_summary($eval, $items, $values); ?>
 
-<!-- Section A -->
+<!-- Signatures of the current version: the drawn signature, name, position, date and time -->
 <section class="card mb-4">
-    <h2 class="text-base font-semibold text-slate-900">A. Compliance to Technical Specifications</h2>
-    <?php if ($items === []): ?>
-        <p class="mt-3 text-sm text-slate-500">No items.</p>
-    <?php else: ?>
-        <div class="mt-4 space-y-4">
-            <?php foreach ($items as $n => $it): ?>
-                <div class="rounded-xl border border-slate-200 bg-slate-50/60 p-4">
-                    <div class="flex flex-wrap items-center justify-between gap-2">
-                        <h3 class="text-sm font-semibold text-slate-900">Item <?= (int) $n + 1 ?> &middot; No. <?= e($it['item_no']) ?></h3>
-                        <?php
-                        $f = (string) ($it['finding'] ?? '');
-                        $fClass = $f === 'responsive'
-                            ? 'bg-green-100 text-green-800 ring-green-300'
-                            : ($f === 'non_responsive' ? 'bg-rose-100 text-rose-800 ring-rose-300' : 'bg-slate-100 text-slate-700 ring-slate-300');
-                        ?>
-                        <span class="inline-flex items-center rounded-full px-2.5 py-1 text-xs font-semibold ring-1 ring-inset <?= $fClass ?>"><?= e(ev_finding_label($f)) ?></span>
-                    </div>
-                    <dl class="mt-3 grid gap-4 text-sm md:grid-cols-2">
-                        <div><dt class="text-slate-500">Technical Specifications</dt><dd class="mt-0.5 whitespace-pre-line text-slate-900"><?= e((string) ($it['specifications'] ?? '')) ?></dd></div>
-                        <div><dt class="text-slate-500">Bidder's Specification/Brand</dt><dd class="mt-0.5 whitespace-pre-line text-slate-900"><?= e((string) ($it['bidder_spec'] ?? '')) ?></dd></div>
-                    </dl>
-                    <?php if ($f === 'non_responsive'): ?>
-                        <div class="mt-3 text-sm">
-                            <p class="text-slate-500">Ground/s</p>
-                            <p class="mt-0.5 whitespace-pre-line text-slate-900"><?= e((string) ($it['grounds'] ?? '') !== '' ? $it['grounds'] : '-') ?></p>
-                        </div>
+    <h2 class="text-base font-semibold text-slate-900">Signatures (version <?= (int) $eval['version'] ?>)</h2>
+    <div class="mt-4 grid gap-4 text-sm sm:grid-cols-3">
+        <?php foreach (['evaluator' => ['Evaluated by', 'End-user'], 'head' => ['Verified by', 'Department/Unit/Section Head or Supervisor'], 'conforme' => ['Conforme', 'Bidder\'s Authorized Representative']] as $role => $labels): ?>
+            <?php
+            $sig    = $signatures[$role] ?? null;
+            $sigSrc = $sig ? print_signature_src($sig['signature_png'] ?? '') : '';
+            ?>
+            <div class="rounded-xl border border-slate-200 bg-slate-50/60 p-3">
+                <p class="text-slate-500"><?= e($labels[0]) ?></p>
+                <div class="mt-2 flex h-20 items-end justify-center rounded-lg bg-white">
+                    <?php if ($sigSrc !== ''): ?>
+                        <img src="<?= e($sigSrc) ?>" alt="Signature of <?= e($sig['typed_name']) ?>" class="max-h-20 max-w-full object-contain">
+                    <?php else: ?>
+                        <span class="pb-2 text-xs text-slate-400">Not signed yet</span>
                     <?php endif; ?>
                 </div>
-            <?php endforeach; ?>
-        </div>
-    <?php endif; ?>
+                <p class="mt-2 border-t border-slate-400 pt-1 text-center font-semibold uppercase text-slate-900"><?= $sig ? e($sig['typed_name']) : '&nbsp;' ?></p>
+                <p class="text-center text-xs text-slate-500"><?= e($labels[1]) ?></p>
+                <?php if ($sig): ?>
+                    <?php if (!empty($sig['position'])): ?>
+                        <p class="mt-1 text-center text-xs text-slate-600"><?= e($sig['position']) ?></p>
+                    <?php endif; ?>
+                    <p class="mt-1 text-center text-xs text-slate-500">Signed <?= e(print_date_time($sig['signed_at'])) ?></p>
+                <?php endif; ?>
+            </div>
+        <?php endforeach; ?>
+    </div>
 </section>
 
-<!-- Section B -->
-<section class="card mb-4">
-    <h2 class="text-base font-semibold text-slate-900">B. Quality Compliance</h2>
-    <p class="mt-2 text-sm text-slate-900">Failed Quality Testing: <strong><?= (int) $values['failed_quality'] === 1 ? 'Yes' : 'No' ?></strong></p>
-    <?php if ((int) $values['failed_quality'] === 1): ?>
-        <?php $bLabels = ev_param_labels($values['b_params'], $qualityParams); ?>
-        <p class="mt-2 text-sm text-slate-600">Parameters: <?= e($bLabels === [] ? '-' : implode(', ', $bLabels)) ?></p>
-        <p class="mt-2 whitespace-pre-line text-sm text-slate-900"><?= e($values['b_details'] !== '' ? $values['b_details'] : '-') ?></p>
-    <?php endif; ?>
-</section>
-
-<!-- Section C -->
-<section class="card mb-4">
-    <h2 class="text-base font-semibold text-slate-900">C. Others</h2>
-    <p class="mt-2 text-sm text-slate-900">Others: <strong><?= (int) $values['others_checked'] === 1 ? 'Yes' : 'No' ?></strong></p>
-    <?php if ((int) $values['others_checked'] === 1): ?>
-        <?php $cLabels = ev_param_labels($values['c_params'], $othersParams); ?>
-        <p class="mt-2 text-sm text-slate-600">Parameters: <?= e($cLabels === [] ? '-' : implode(', ', $cLabels)) ?></p>
-        <p class="mt-2 whitespace-pre-line text-sm text-slate-900"><?= e($values['c_details'] !== '' ? $values['c_details'] : '-') ?></p>
-    <?php endif; ?>
-</section>
+<!-- Cancel (MMS only; the server checks again) -->
+<?php if ($canCancel): ?>
+    <details class="card mb-4">
+        <summary class="flex min-h-11 cursor-pointer items-center text-sm font-semibold text-rose-700">Cancel this form</summary>
+        <form method="post" action="<?= e(url('common/cancel.php')) ?>" class="mt-3 space-y-3">
+            <?= csrf_field() ?>
+            <input type="hidden" name="id" value="<?= (int) $id ?>">
+            <label for="cancel_reason" class="block text-sm font-medium text-slate-700">Reason for cancelling (required)</label>
+            <textarea id="cancel_reason" name="reason" rows="3" required class="w-full rounded-xl border border-slate-300 px-3 py-2 text-sm focus:border-rose-500 focus:outline-none focus:ring-4 focus:ring-rose-100"></textarea>
+            <button type="submit" class="btn btn-secondary w-full sm:w-auto" onclick="return confirm('Cancel this form? This cannot be undone.');">Cancel form</button>
+        </form>
+    </details>
+<?php endif; ?>
 
 <!-- Status history -->
 <section class="card mb-4">
@@ -175,7 +173,7 @@ page_header('Evaluation form', mms_form_title($eval));
 </section>
 
 <p>
-    <a href="<?= e(url($user['role'] === 'evaluator' || $user['role'] === 'head' ? 'evaluator/assignments.php' : 'common/dashboard.php')) ?>" class="btn btn-secondary w-full sm:w-auto">Back</a>
+    <a href="<?= e(url($backPage)) ?>" class="btn btn-secondary w-full sm:w-auto">Back</a>
 </p>
 
 <?php require __DIR__ . '/../app/views/layout/footer.php'; ?>

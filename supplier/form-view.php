@@ -4,6 +4,9 @@
  *
  * Read-only view of ONE form for the supplier who owns it: the supplier part
  * plus a status timeline. No evaluator data is read or shown here.
+ *
+ * Step 10: when the form is waiting for the supplier's Conforme, the header
+ * button and a banner lead to supplier/conforme.php.
  */
 
 require_once __DIR__ . '/../app/bootstrap.php';
@@ -21,6 +24,9 @@ if (!$eval || !can_view_evaluation($user, $eval)) {
 $items   = supplier_load_items($id);
 $history = supplier_load_history($id);
 $canEdit = can_edit_supplier_part($user, $eval);
+
+// Waiting for the supplier's Conforme (the conforme page checks everything again).
+$needsConforme = (string) $eval['status'] === 'pending_conforme';
 
 // The latest reason MMS gave when it returned or cancelled the form.
 $returnRemarks = '';
@@ -55,16 +61,35 @@ function supplier_timeline_title(string $status): string
     return status_label($status);
 }
 
+// The button in the page header: edit while it is yours to edit, Conforme when it is waiting for it.
+$actionUrl   = '';
+$actionLabel = '';
+if ($canEdit) {
+    $actionUrl   = 'supplier/form-edit.php?id=' . $id;
+    $actionLabel = $eval['status'] === 'returned_supplier' ? 'Edit and resubmit' : 'Edit form';
+} elseif ($needsConforme) {
+    $actionUrl   = 'supplier/conforme.php?id=' . $id;
+    $actionLabel = 'Sign the Conforme';
+}
+
 $pageTitle = 'Form ' . ($eval['bid_ref_no'] !== '' ? $eval['bid_ref_no'] : '#' . $id);
 require __DIR__ . '/../app/views/layout/header.php';
 
 page_header(
     $eval['bid_ref_no'] !== '' ? $eval['bid_ref_no'] : 'Form #' . $id,
     'Evaluation Form ZCMC-F-PROC-29',
-    $canEdit ? 'supplier/form-edit.php?id=' . $id : '',
-    $canEdit ? ($eval['status'] === 'returned_supplier' ? 'Edit and resubmit' : 'Edit form') : ''
+    $actionUrl,
+    $actionLabel
 );
 ?>
+
+<?php if ($needsConforme): ?>
+    <div role="status" class="mb-6 rounded-xl border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm text-emerald-900">
+        <p class="font-semibold">Your Conforme is needed.</p>
+        <p class="mt-1">The evaluation is done. Please sign the Conforme to complete this form. If you prefer to sign on paper, contact MMS.</p>
+        <a href="<?= e(url('supplier/conforme.php?id=' . $id)) ?>" class="btn btn-primary mt-3 w-full sm:w-auto">Sign the Conforme</a>
+    </div>
+<?php endif; ?>
 
 <?php if ($eval['status'] === 'returned_supplier'): ?>
     <div role="alert" class="mb-6 rounded-xl border border-rose-200 bg-rose-50 px-4 py-3 text-sm text-rose-900">

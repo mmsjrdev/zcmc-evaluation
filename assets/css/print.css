@@ -7,6 +7,10 @@
  * Paper: 8.5 x 13 in (Legal / Folio), margins as in Evaluation_Form.docx.
  * The letterhead and the footer are "fixed": the browser repeats them on every
  * printed page, and the page margins below leave room for them.
+ *
+ * Step 10: the footer got a third, small line (the verify address), so the
+ * footer spacer (.foot-space) is taller and .footer-verify is new.
+ * The Conforme signature, name and caption are centered like the other two.
  */
 
 /* ---------- Paper ---------- */
@@ -164,9 +168,12 @@ p { margin: 0; }
 .sig-caption-left { text-align: left; }
 .sig-date { font-size: 7.5pt; margin-top: 0.03in; }
 
+/* Conforme: "Conforme:" and the date stay on the left; the signature, the
+   printed name and the caption are centered under the line, like the two above. */
 .conforme { width: 3.9in; margin-top: 0.08in; }
-.conforme .sig-image { justify-content: flex-start; }
-.conforme .sig-line  { text-align: left; }
+.conforme .sig-image { justify-content: center; }
+.conforme .sig-line  { text-align: center; }
+.conforme .sig-caption { text-align: center; }
 .conforme-date { margin-top: 0.07in; }
 .conforme-date-line { display: inline-block; min-width: 2.1in; border-bottom: 1px solid #000; padding: 0 0.04in; }
 
@@ -215,9 +222,12 @@ p { margin: 0; }
         position: fixed; bottom: 0; left: 0; width: 5.6in; margin: 0; padding: 0;
         border: 1px solid #000; font-size: 8pt; line-height: 1.25;
     }
-    .foot-space { height: 0.5in; }
+    .foot-space { height: 0.72in; }
     .footer-code  { width: 1.7in; padding: 0.1in 0.08in; border-right: 1px solid #000; display: flex; align-items: flex-end; }
     .footer-title { flex: 1; padding: 0.06in 0.08in; text-align: right; }
+
+    /* The verify address: small, and allowed to wrap so it never leaves the box. */
+    .footer-verify { font-size: 6.5pt; overflow-wrap: anywhere; }
 
     .paper, .paper > tbody > tr > td, .paper > thead > tr > td, .paper > tfoot > tr > td { padding: 0; }
     .paper > thead { display: table-header-group; }

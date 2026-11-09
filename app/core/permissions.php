@@ -9,7 +9,9 @@
  *   - Form rules:   can_view_evaluation(), can_edit_supplier_part(),
  *                   can_edit_evaluator_part(), can_distribute(),
  *                   can_claim_evaluation(), can_send_back_evaluation(),
- *                   can_verify_evaluation()
+ *                   can_verify_evaluation(), can_sign_as_evaluator(),
+ *                   can_sign_as_head(), signing_role_for(),
+ *                   can_return_evaluation(), can_cancel_evaluation()
  *
  * Which status may move to which status is NOT decided here. That lives only
  * in app/domain/workflow.php.
@@ -325,4 +327,121 @@ function can_verify_evaluation(array $user, array $eval): bool
 
     return !empty($eval['department_id'])
         && in_array((int) $eval['department_id'], verifier_department_ids($user), true);
+}
+// ---------------------------------------------------------------------------
+// Step 9: signing, returning and cancelling
+// ---------------------------------------------------------------------------
+
+/**
+ * Has this person ever signed this form in the given role ('evaluator' or
+ * 'head'), in ANY version? Used so nobody signs as both evaluator and head.
+ */
+function user_has_signed_as(array $user, array $eval, string $role): bool
+{
+    $stmt = db()->prepare(
+        'SELECT 1 FROM signatures
+          WHERE evaluation_id = :id AND user_id = :u AND role = :r
+          LIMIT 1'
+    );
+    $stmt->execute([':id' => (int) $eval['id'], ':u' => (int) $user['id'], ':r' => $role]);
+    return $stmt->fetchColumn() !== false;
+}
+
+/**
+ * Is there at least one ACTIVE Department Head (or alternate verifier) for this
+ * department other than $excludeUserId? Used when a head evaluates: their own
+ * evaluation must go to somebody else.
+ */
+function department_has_other_verifier(int $departmentId, int $excludeUserId): bool
+{
+    $stmt = db()->prepare(
+        "SELECT 1 FROM users u
+          WHERE u.role = 'head' AND u.status = 'active' AND u.id <> :ex
+            AND (u.department_id = :d1
+                 OR u.id IN (SELECT a.head_user_id FROM alternate_verifiers a WHERE a.department_id = :d2))
+          LIMIT 1"
+    );
+    $stmt->execute([':ex' => $excludeUserId, ':d1' => $departmentId, ':d2' => $departmentId]);
+    return $stmt->fetchColumn() !== false;
+}
+
+/**
+ * May this person sign the form as EVALUATOR right now?
+ * Only the assigned evaluator (an evaluator, or a head who evaluates), from
+ * pending_evaluation or returned_evaluator, not yet signed in this version,
+ * and never somebody who already signed this form as head.
+ * (The status part comes from the workflow table.)
+ */
+function can_sign_as_evaluator(array $user, array $eval): bool
+{
+    return user_is_usable($user)
+        && in_array($user['role'], ['evaluator', 'head'], true)
+        && can_transition($eval, 'sign_evaluator', $user)
+        && !evaluator_has_signed($eval)
+        && !user_has_signed_as($user, $eval, 'head');
+}
+
+/**
+ * May this person sign the form as DEPARTMENT HEAD right now?
+ * can_verify_evaluation() holds the department and "never your own evaluation"
+ * rules. On top of that: never somebody who signed this form as evaluator.
+ */
+function can_sign_as_head(array $user, array $eval): bool
+{
+    return can_verify_evaluation($user, $eval)
+        && can_transition($eval, 'sign_head', $user)
+        && !user_has_signed_as($user, $eval, 'evaluator');
+}
+
+/**
+ * Which signature could this person add now? 'evaluator', 'head' or null.
+ * admin, mm_staff, head_nurse and supplier always get null.
+ */
+function signing_role_for(array $user, array $eval): ?string
+{
+    if (can_sign_as_evaluator($user, $eval)) {
+        return 'evaluator';
+    }
+    if (can_sign_as_head($user, $eval)) {
+        return 'head';
+    }
+    return null;
+}
+
+/**
+ * May this person send the form back to the evaluator for correction?
+ *   head      while the form is pending_head (and may verify it)
+ *   mm_staff  while the form is completed
+ */
+function can_return_evaluation(array $user, array $eval): bool
+{
+    if (!user_is_usable($user)) {
+        return false;
+    }
+    if ($user['role'] === 'head') {
+        return can_verify_evaluation($user, $eval) && can_transition($eval, 'return_evaluator', $user);
+    }
+    if ($user['role'] === 'mm_staff') {
+        return can_transition($eval, 'return_completed', $user);
+    }
+    return false;
+}
+
+/**
+ * May this person cancel the form?
+ *   mm_staff  at any step before completed
+ *   supplier  only while the form is theirs to edit (draft or returned to them)
+ */
+function can_cancel_evaluation(array $user, array $eval): bool
+{
+    if (!user_is_usable($user)) {
+        return false;
+    }
+    if ($user['role'] === 'mm_staff') {
+        return can_transition($eval, 'cancel', $user);
+    }
+    if ($user['role'] === 'supplier') {
+        return can_transition($eval, 'cancel_supplier', $user);
+    }
+    return false;
 }
