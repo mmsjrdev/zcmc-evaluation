@@ -9,8 +9,9 @@
  * Suppliers, MMS staff, Head Nurses and admins can NOT register here.
  * Whatever is chosen is only a REQUEST: the stored role is always "evaluator".
  *
- * Step 15: while OTP_ENABLED is true, the new account is not usable until the
- * email is confirmed with a 6-digit code (auth/verify-email.php).
+ * Step 15: while OTP_ENABLED is true, the sign-up is NOT saved in `users` until the
+ * email is confirmed with a 6-digit code (auth/verify-email.php). Until then it waits
+ * in pending_registrations, so an abandoned sign-up never blocks the email.
  */
 
 require_once __DIR__ . '/../app/bootstrap.php';
@@ -51,13 +52,19 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 
     // ---- Check it ----------------------------------------------------------
     // Email
+    $reuseId = null;   // id of an old, never-confirmed row with this email (see below)
     if (!filter_var($values['email'], FILTER_VALIDATE_EMAIL) || strlen($values['email']) > 190) {
         $errors['email'] = 'Enter a valid email address.';
     } else {
         $check = db()->prepare('SELECT id FROM users WHERE email = :email LIMIT 1');
         $check->execute([':email' => $values['email']]);
         if ($check->fetch()) {
-            $errors['email'] = 'An account with this email already exists.';
+            // A leftover row that was never confirmed with the code (old behaviour) is not a
+            // real account: it is removed when the sign-up is saved, instead of blocking the email.
+            $reuseId = otp_abandoned_registration_id($values['email']);
+            if ($reuseId === null) {
+                $errors['email'] = 'An account with this email already exists.';
+            }
         }
     }
 
@@ -115,6 +122,53 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         $status = ($values['register_as'] === 'head') ? 'pending' : 'active';
 
         try {
+            // Step 15: with the code step on, NOTHING is written to `users` yet.
+            // The form waits in pending_registrations until the email code is correct
+            // (auth/verify-email.php then creates the real account).
+            if (otp_required('register')) {
+                // A leftover, never-confirmed row from the old behaviour is not a real account.
+                if ($reuseId !== null) {
+                    db()->prepare("DELETE FROM users WHERE id = :id AND email_verified_at IS NULL AND role = 'evaluator'")
+                        ->execute([':id' => $reuseId]);
+                }
+
+                // Housekeeping: forget sign-ups that were never confirmed within a day.
+                db()->exec('DELETE FROM pending_registrations WHERE created_at < (NOW() - INTERVAL 1 DAY)');
+
+                // Registering again with the same email replaces the waiting data
+                // (code counters are kept, so the resend limits still apply).
+                db()->prepare(
+                    "INSERT INTO pending_registrations
+                        (email, password_hash, full_name, employee_id, department_id, `position`, contact_no, requested_role)
+                     VALUES
+                        (:email, :hash, :name, :employee_id, :department_id, :position, :contact_no, :requested_role)
+                     ON DUPLICATE KEY UPDATE
+                        password_hash = VALUES(password_hash), full_name = VALUES(full_name),
+                        employee_id = VALUES(employee_id), department_id = VALUES(department_id),
+                        `position` = VALUES(`position`), contact_no = VALUES(contact_no),
+                        requested_role = VALUES(requested_role), created_at = NOW()"
+                )->execute([
+                    ':email'          => $values['email'],
+                    ':hash'           => password_hash($password, PASSWORD_DEFAULT),
+                    ':name'           => $values['full_name'],
+                    ':employee_id'    => $values['employee_id'],
+                    ':department_id'  => $departmentId,
+                    ':position'       => $values['position'],
+                    ':contact_no'     => $values['contact_no'],
+                    ':requested_role' => $values['register_as'],
+                ]);
+                $pending = pending_registration_by_email($values['email']);
+
+                audit_write(null, 'register_pending', 'Sign-up started (email not confirmed yet), as ' . $values['register_as']);
+
+                session_regenerate_id(true);
+                unset($_SESSION['verify_user_id']);
+                $_SESSION['verify_pending_id'] = (int) $pending['id'];
+                flash('success', 'Almost done. Confirm your email with the code we send you. Your account is created only after that.');
+                redirect('auth/verify-email.php');
+            }
+
+            // Code step switched off: create the account right away, as before.
             $insert = db()->prepare(
                 "INSERT INTO users
                     (email, password_hash, full_name, employee_id, department_id, `position`,
@@ -137,15 +191,6 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             $newId = (int) db()->lastInsertId();
 
             audit_write($newId, 'register', 'Registered as ' . $values['register_as'] . ' (status ' . $status . ')');
-
-            // Step 15: with OTP on, the email must be confirmed with a code before
-            // the account can be used. email_verified_at stays empty until then.
-            if (otp_required('register')) {
-                session_regenerate_id(true);
-                $_SESSION['verify_user_id'] = $newId;
-                flash('success', 'Account created. Confirm your email with the code we send you to finish.');
-                redirect('auth/verify-email.php');
-            }
 
             if ($status === 'pending') {
                 flash('success', 'Account created. Your Department Head request waits for the administrator. '
